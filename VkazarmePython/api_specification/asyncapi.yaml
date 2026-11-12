@@ -1,0 +1,210 @@
+asyncapi: '2.6.0'
+info:
+  title: Социальная сеть для сослуживцев — Чаты (Async)
+  version: '0.3'
+  description: |
+    Асинхронный API для чатов социальной сети.
+    Стыкуется с REST API, где:
+      - /chats — управление чатами
+      - /chats/{ChatID}/messages — получение истории сообщений
+      - Отправка сообщений через POST /chats/{ChatID}/messages
+    
+    WebSocket обеспечивает доставку новых сообщений в реальном времени,
+    а также события об изменениях участников и статусов чатов.
+
+servers:
+  chat-ws:
+    url: wss://{host}/ws/chats
+    protocol: wss
+    protocolVersion: '1.1'
+    variables:
+      host:
+        default: api.vkazarme.com
+        description: Base URL of the WebSocket server
+
+channels:
+  # Основной канал для получения событий по чатам
+  chats/{ChatID}:
+    description: Канал для получения событий конкретного чата
+    parameters:
+      ChatID:
+        $ref: '#/components/schemas/ChatID'
+      token:
+        in: query
+        required: true
+        schema:
+          type: string
+          description: JWT токен пользователя для авторизации
+        example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+    publish:
+      summary: Отправка событий от сервера клиенту
+      description: Сервер отправляет события в чат: новые сообщения, статусы, изменения участников
+      message:
+        oneOf:
+          - $ref: '#/components/messages/NewMessageEvent'
+          - $ref: '#/components/messages/ChatStatusEvent'
+          - $ref: '#/components/messages/MemberChangeEvent'
+
+    subscribe:
+      summary: Подписка клиента на события чата
+      description: Клиент инициирует подписку на события конкретного чата.
+      message:
+        name: SubscribeRequest
+        content:
+          $ref: '#/components/schemas/SubscribeRequest'
+
+components:
+  schemas:
+    ChatID:
+      type: integer
+      format: int64
+      example: 123412341234
+
+    SubscribeRequest:
+      type: object
+      required:
+        - type
+        - chatId
+      properties:
+        type:
+          type: string
+          enum: [subscribe]
+          example: subscribe
+        chatId:
+          $ref: '#/components/schemas/ChatID'
+        # Опционально можно добавить lastSeenMessageId для синхронизации
+        lastSeenMessageId:
+          type: integer
+          format: int64
+          example: 987654321
+          description: ID последнего известного сообщения клиента для синхронизации истории
+
+    MessagePayload:
+      type: object
+      required:
+        - id
+        - user_id
+        - text
+        - time
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1234324214
+        user_id:
+          type: integer
+          format: int64
+          example: 5678
+        text:
+          type: string
+          example: "Привет, дру!"
+        time:
+          type: string
+          format: date-time
+          example: "2023-02-06T14:28:00Z"
+        chat_member_id:
+          type: integer
+          format: int64
+          example: 123441412234
+          description: Опционально: ID участника чата (если есть отдельная сущность)
+
+    ChatStatusPayload:
+      type: object
+      required:
+        - status
+        - chatId
+      properties:
+        status:
+          type: string
+          enum: ['online', 'offline', 'muted', 'archived']
+          example: online
+        chatId:
+          $ref: '#/components/schemas/ChatID'
+        details:
+          type: object
+          additionalProperties: true
+
+    MemberChangePayload:
+      type: object
+      required:
+        - action
+        - userId
+        - chatId
+      properties:
+        action:
+          type: string
+          enum: ['joined', 'left', 'kicked', 'role_changed']
+          example: joined
+        userId:
+          type: integer
+          format: int64
+          example: 5678
+        chatId:
+          $ref: '#/components/schemas/ChatID'
+        role:
+          type: string
+          enum: ['member', 'owner', 'moderator']
+          example: member
+
+  messages:
+    NewMessageEvent:
+      name: newMessage
+      summary: Новое сообщение в чате
+      contentType: application/json
+      payload:
+        type: object
+        required:
+          - type
+          - chatId
+          - payload
+        properties:
+          type:
+            type: string
+            enum: [newMessage]
+            example: newMessage
+          chatId:
+            $ref: '#/components/schemas/ChatID'
+          payload:
+            $ref: '#/components/schemas/MessagePayload'
+
+    ChatStatusEvent:
+      name: chatStatus
+      summary: Изменение статуса чата или участников
+      contentType: application/json
+      payload:
+        type: object
+        required:
+          - type
+          - chatId
+          - payload
+        properties:
+          type:
+            type: string
+            enum: [chatStatus]
+            example: chatStatus
+          chatId:
+            $ref: '#/components/schemas/ChatID'
+          payload:
+            $ref: '#/components/schemas/ChatStatusPayload'
+
+    MemberChangeEvent:
+      name: memberChange
+      summary: Изменение состава участников чата
+      contentType: application/json
+      payload:
+        type: object
+        required:
+          - type
+          - chatId
+          - payload
+        properties:
+          type:
+            type: string
+            enum: [memberChange]
+            example: memberChange
+          chatId:
+            $ref: '#/components/schemas/ChatID'
+          payload:
+            $ref: '#/components/schemas/MemberChangePayload'
+

@@ -1,0 +1,31 @@
+services:
+  app: #TODO: Надо бы переделать app под текущие требования
+    build: ./app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mailpit
+    networks:
+      - testnet
+    restart: on-failure
+
+  mailpit: #TODO: Нужно порты перебросить на другие
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"   # Web UI + API
+      - "1025:1025"   # SMTP
+    networks:
+      - testnet
+
+  mail_tests:
+    build: ./tests
+    depends_on:
+      - app
+      - mailpit
+    networks:
+      - testnet
+
+networks:
+  testnet:
+    driver: bridge
+

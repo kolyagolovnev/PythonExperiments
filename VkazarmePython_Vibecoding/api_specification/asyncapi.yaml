@@ -1,0 +1,217 @@
+# =============================================================================
+# Vkazarme — Social Network for Fellow Servicemen
+# Realtime (WebSocket) contract for frontend handover.
+#
+# Matches the implemented backend (FastAPI, milestone 5). REST remains the
+# write path: POST /chats/{ChatID}/messages stores the message and the
+# server pushes it to every subscriber of the chat. See openapi.yaml for the
+# REST side.
+# =============================================================================
+asyncapi: '2.6.0'
+info:
+  title: Social Network for Fellow Servicemen — Chats (Async)
+  version: 1.0.0
+  description: |
+    Realtime delivery for chats, complementing the REST API:
+
+      - /chats — chat management (see openapi.yaml)
+      - /chats/{ChatID}/messages — history (GET) and sending (POST)
+
+    # Connecting
+    Open a WebSocket to /ws/chats/{ChatID} with the JWT as a **query
+    parameter** (browsers cannot set headers on WebSocket):
+
+        ws://localhost:9999/ws/chats/1?token=<JWT>
+
+    The server accepts the connection, then the client MUST send a
+    `SubscribeRequest` as its first frame. After a valid subscribe the
+    server streams event envelopes (`newMessage`, `memberChange`) for that
+    chat only. Keep the connection alive with `{"type": "ping"}` frames;
+    the server answers `{"type": "pong"}`.
+
+    # Close codes
+    After the handshake the server closes the socket with one of:
+
+      - 4400 — the first frame was not a valid SubscribeRequest, or its
+        chatId does not match the URL
+      - 4401 — missing, invalid or expired token
+      - 4403 — the token's user is not a member of the chat
+      - 4404 — the chat does not exist
+
+    # Delivery guarantees
+    At-most-once to currently connected subscribers: events are not queued
+    for offline clients and not re-sent after reconnect. To catch up, read
+    the history via GET /chats/{ChatID}/messages (the `lastSeenMessageId`
+    field of SubscribeRequest is accepted for compatibility but ignored —
+    resynchronization is the client's job via the REST history endpoint).
+
+    # Events not implemented (reserved)
+    The `chatStatus` event of the draft v0.3 AsyncAPI (online/offline/muted/
+    archived) has no backend source yet and is not sent.
+
+servers:
+  local:
+    url: ws://localhost:9999/ws/chats
+    protocol: ws
+    description: Local development server (uvicorn)
+  production:
+    url: wss://{host}/ws/chats
+    protocol: wss
+    variables:
+      host:
+        default: api.vkazarme.com
+        description: Base host; a reverse proxy terminates TLS
+
+channels:
+  chats/{ChatID}:
+    description: Realtime event stream of one chat
+    parameters:
+      ChatID:
+        $ref: '#/components/parameters/ChatID'
+      token:
+        description: JWT access token (the same one REST uses).
+        schema:
+          type: string
+        examples: ["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."]
+
+    subscribe:
+      summary: Subscribe the socket to this chat's events
+      description: >
+        The client's first frame. The chatId must match the URL. Further
+        subscribe frames are ignored; ping frames are answered with pong.
+      message:
+        $ref: '#/components/messages/SubscribeRequest'
+    publish:
+      summary: Server-pushed events for this chat
+      description: >
+        Envelopes arrive as JSON objects with `type`, `chatId` and
+        `payload`. Only events of the subscribed chat are delivered.
+      message:
+        oneOf:
+          - $ref: '#/components/messages/NewMessageEvent'
+          - $ref: '#/components/messages/MemberChangeEvent'
+
+components:
+  parameters:
+    ChatID:
+      description: Identifier of the chat to subscribe to.
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+
+  messages:
+    SubscribeRequest:
+      name: subscribe
+      title: Subscribe
+      summary: First frame from the client
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscribeRequest'
+    NewMessageEvent:
+      name: newMessage
+      title: New message
+      summary: A message was posted to the chat
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NewMessageEvent'
+    MemberChangeEvent:
+      name: memberChange
+      title: Membership changed
+      summary: Someone joined, left or was kicked
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/MemberChangeEvent'
+
+  schemas:
+    SubscribeRequest:
+      type: object
+      required: [type, chatId]
+      properties:
+        type:
+          type: string
+          enum: [subscribe]
+          examples: ["subscribe"]
+        chatId:
+          description: Must equal the ChatID of the connection URL.
+          type: integer
+          format: int64
+          examples: [10]
+        lastSeenMessageId:
+          type: integer
+          format: int64
+          description: >
+            Accepted but ignored; catch up via the REST history endpoint.
+
+    NewMessageEvent:
+      type: object
+      description: Sent to every subscriber when a message is stored via REST.
+      required: [type, chatId, payload]
+      properties:
+        type:
+          type: string
+          enum: [newMessage]
+          examples: ["newMessage"]
+        chatId:
+          type: integer
+          format: int64
+          examples: [10]
+        payload:
+          type: object
+          description: Same shape as the REST Message schema.
+          required: [id, user_id, text, time]
+          properties:
+            id:
+              type: integer
+              format: int64
+              examples: [1234324214]
+            user_id:
+              type: integer
+              format: int64
+              description: The message author.
+              examples: [1]
+            text:
+              type: string
+              examples: ["Hi, friend!"]
+            time:
+              type: string
+              format: date-time
+              examples: ["2023-02-06T14:28:00Z"]
+
+    MemberChangeEvent:
+      type: object
+      description: Sent to every subscriber on chat membership changes.
+      required: [type, chatId, payload]
+      properties:
+        type:
+          type: string
+          enum: [memberChange]
+          examples: ["memberChange"]
+        chatId:
+          type: integer
+          format: int64
+          examples: [10]
+        payload:
+          type: object
+          required: [action, userId, role]
+          properties:
+            action:
+              type: string
+              enum: [joined, left, kicked]
+              description: >
+                joined — the user was added (any member may add in a public
+                chat); left — the user removed themself; kicked — the owner
+                removed the user.
+              examples: ["joined"]
+            userId:
+              type: integer
+              format: int64
+              examples: [3]
+            role:
+              type: string
+              enum: [member, owner]
+              description: >
+                Always "member" for events of this version: owners are
+                assigned at chat creation and can never join, leave or be
+                removed afterwards.
+              examples: ["member"]

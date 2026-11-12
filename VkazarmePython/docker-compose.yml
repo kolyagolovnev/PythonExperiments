@@ -1,0 +1,10 @@
+services:
+  swagger-ui:
+    image: swaggerapi/swagger-editor
+    container_name: swagger
+    ports:
+      - "10081:80"
+    volumes:
+      - ./api_specification:/tmp
+    environment:
+      - SWAGGER_JSON=/tmp/openapi.json

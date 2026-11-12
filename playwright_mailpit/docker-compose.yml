@@ -1,0 +1,31 @@
+services:
+  app:
+    build: ./app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mailpit
+    networks:
+      - testnet
+    restart: on-failure
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"   # Web UI + API
+      - "1025:1025"   # SMTP
+    networks:
+      - testnet
+
+  tests:
+    build: ./tests
+    depends_on:
+      - app
+      - mailpit
+    networks:
+      - testnet
+
+networks:
+  testnet:
+    driver: bridge
+

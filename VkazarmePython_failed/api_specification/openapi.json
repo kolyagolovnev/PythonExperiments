@@ -1,0 +1,2430 @@
+{
+  "openapi": "3.2.3",
+  "info": {
+    "version": "0.3",
+    "title": "Социальная сеть для сослуживцев",
+    "description": "Цель работы - разработать социальную сеть для бывших сослуживцев.\nПредоставляемая возможность - иметь возможность упрощенного поиска и общения для тех, кто служил в одном подразделении, хотел бы больше узнать о своем подразделении и тд.\n# Краткий перечень функциональных требований\n- Создание и редактирование своего профиля\n- Размещение на своем профилей записей\n- Поиск, добавление и удаление друзей\n- Общение с друзьями в чате\n- Поиск, подписка и отписка групп\n- Возможность оставлять комментарии на записях группы, человека"
+  },
+  "servers": [
+    {
+      "url": "{protocol}://{host}/api/v1",
+      "variables": {
+        "protocol": {
+          "default": "https"
+        },
+        "host": {
+          "default": "api.vkazarme.com",
+          "description": "Base URL of the API"
+        }
+      }
+    },
+    {
+      "url": "https://localhost:8888/api/v1",
+      "description": "https/http2 server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "account",
+      "description": "Действия, связанные с управлением аккаунта"
+    },
+    {
+      "name": "users",
+      "description": "Действия, связанные с пользователями"
+    },
+    {
+      "name": "groups",
+      "description": "Действия, связанные с группами"
+    },
+    {
+      "name": "chats",
+      "description": "Действия, связанные с чатами"
+    },
+    {
+      "name": "media",
+      "description": "Для работ с media файлами"
+    }
+  ],
+  "paths": {
+    "/account/signin/init": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Инициирует случайные значения на сервере для защиты от CSRF-атак",
+        "responses": {
+          "200": {
+            "description": "Значение было инициализировано",
+            "content": {
+              "application/json": {
+                "scheme": {
+                  "$ref": "#/components/schemas/SignInInit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Что-то пошло не так"
+          }
+        }
+      }
+    },
+    "/account/signin/oauth2/{provider}/callback": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Вход/Регистрация через oauth2 сервис по типу Google или VK",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "type": "string",
+            "enum": [
+              "vk",
+              "google"
+            ]
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "scheme": {
+                "$ref": "#/components/schemas/OAuthCallback"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": null,
+            "content": {
+              "application/json": {
+                "scheme": {
+                  "$ref": "#/components/schemas/AuthToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Неверный или истёкший code"
+          },
+          "403": {
+            "description": "Mismatch state (CSRF защита сработала)"
+          }
+        }
+      }
+    },
+    "/account/signin/standard": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Вход пользователя",
+        "description": "Запрос на сервер с введенными параметрами пользователя",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": null,
+            "content": {
+              "application/json": {
+                "scheme": {
+                  "$ref": "#/components/schemas/AuthToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Неверный формат данных"
+          },
+          "403": {
+            "description": "Неверный логин или пароль"
+          }
+        }
+      }
+    },
+    "/account/signin/admin": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Вход в административную панель",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "403": {
+            "description": "Неправильный логин и/или пароль"
+          }
+        }
+      }
+    },
+    "/account/signup": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Регистрация пользователя",
+        "description": "Регистрация через email/пароль.\nКогда пользователь регистрируется автоматически создаётся привязанная к нему группа c GroupID.\nТакже, личную группу админ не может удалить или исправить, если только не удалит пользователя\n",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignUpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Пользователь создан (новый, временный, но пока не подтвержденный)"
+          },
+          "400": {
+            "description": "Некорректные данные (например, неверный формат email, пустой пароль)"
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Получение списка людей по каким-то параметрам поиска",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Имя пользователя",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "surname",
+            "in": "query",
+            "description": "Фамилия пользователя",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserListItem"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/users/{UserID}": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Информация о пользователе",
+        "description": "Пользователь хочет получить информацию о выбранном пользователе",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "404": {
+            "description": "Такого человека не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Удаление пользователя",
+        "description": "Удаляет пользователя из социальной сети, данная операция может быть осуществлена только с правами администратора",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Пользователь успешно удален"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "404": {
+            "description": "Такого человека не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ],
+        "x-required-role": "admin"
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Изменение пользовательского профиля",
+        "description": "По сути, делать PATCH запрос должен только пользователь с AccountID == UserID, но я решил последовать более строгой идеологии Rest вместо PATCH /account",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/users/{UserID}/friends": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Получение списка людей по каким-то параметрам поиска",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Имя пользователя",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "surname",
+            "in": "query",
+            "description": "Фамилия пользователя",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendListItem"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Добавить пользователя в друзья",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/Friend"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет прав доступа"
+          },
+          "404": {
+            "description": "Такого пользователя не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/users/{UserID}/friends/{FriendID}": {
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Удалить пользователя из друзей",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "FriendID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет прав доступа"
+          },
+          "404": {
+            "description": "Такого друга не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/users/{UserID}/subscriptions": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Подписка на выбранную группу",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Subscription"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет прав доступа"
+          },
+          "404": {
+            "description": "Такой группы не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Вывод групп, на которые подписан пользователь",
+        "description": "Должен выводить все подписки (кроме той группы, к которой привязаны личные посты пользователя, но это можно сделать и на фронтенде). Для групп, к которым привязаны пользовательские посты, наверное нужно на бэкенде создавать элемент группы из фотки + название из фамилии и имени + помечать, что это посты пользователя. Также, только админ может сделать подписку для пользователя с флагом is_moderator = True. Также, админ не имеет права привязывать модератора к чьей-то персональной страничке.",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubscriptionListItem"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет прав доступа"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/users/{UserID}/subscriptions/{SubscriptionID}": {
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Отписка от группы",
+        "parameters": [
+          {
+            "name": "UserID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          },
+          {
+            "name": "SubscriptionID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет прав доступа"
+          },
+          "404": {
+            "description": "Такой подписки не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/groups": {
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Список групп",
+        "description": "Выводит список групп, которые ищет пользователь",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Название группы",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupListItem"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Создание группы",
+        "description": "Создание новой группы с описанием. Можно только с правами администратора",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Group"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Группа успешно создана"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "У пользователя нет прав администратора"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ],
+        "x-required-role": "admin"
+      }
+    },
+    "/groups/{GroupID}": {
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Вывод профиля группы",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Group"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "404": {
+            "description": "Такой группы не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Изменение описание группы",
+        "description": "Только с правами администратора (модератор не имеет права на это)",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "У пользователя нет прав администратора"
+          },
+          "404": {
+            "description": "Такой группы не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ],
+        "x-required-role": "admin"
+      },
+      "delete": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Удаление группы",
+        "description": "Только с правами администратора",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "У пользователя нет прав администратора"
+          },
+          "404": {
+            "description": "Такой группы не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ],
+        "x-required-role": "admin"
+      }
+    },
+    "/groups/{GroupID}/pastes": {
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Просмотр записей из группы",
+        "description": "Получение списка записей",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "description": "ID группы",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Paste"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "404": {
+            "description": "Такой записи не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Добавление записи",
+        "description": "Пользователь от собственного имени опубликовывает запись",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "description": "ID группы",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PastePost"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Запись сохранена"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет права опубликовывать посты в данной группе"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/groups/{GroupID}/pastes/{PasteID}": {
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Просмотр содержания поста",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "description": "ID группы",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "PasteID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Пост получен",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paste"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "404": {
+            "description": "Такого поста нет"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Удаление поста",
+        "description": "Только с параметрами администратора",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "description": "ID группы",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "PasteID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Пост удален"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет прав"
+          },
+          "404": {
+            "description": "Такого поста нет"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/groups/{GroupID}/pastes/{PasteID}/comments": {
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Просмотр комментариев поста",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "description": "ID группы",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "PasteID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Комментарии получены",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Comment"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "404": {
+            "description": "Такого поста нет"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "groups"
+        ],
+        "summary": "Комментирование записи",
+        "description": "Пользователь хочет прокомментировать запись",
+        "parameters": [
+          {
+            "name": "GroupID",
+            "in": "path",
+            "description": "ID группы",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "PasteID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Comment"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Комментарий отправлен"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "404": {
+            "description": "Такой записи не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/chats": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Получение списка чатов",
+        "description": "Пользователь переходит на вкладку \"Мои сообщения\" и получает список чатов",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChatListItem"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Создать новый чат",
+        "description": "Создание нового чата, в качестве параметра передается ID пользователя, с которым собираемся общаться",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatPost"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/chats/{ChatID}": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Включение чата",
+        "description": "Пользователь начинает переписываться в чате (описание работы осуществляется через Async API)",
+        "parameters": [
+          {
+            "name": "ChatID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Chat"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет право на этот чат"
+          },
+          "404": {
+            "description": "Такого чата не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/chats/{ChatID}/members": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Получение списка участников чата",
+        "description": "Получение списка участникова чата с ID = ChatID",
+        "parameters": [
+          {
+            "name": "ChatID",
+            "in": "path",
+            "description": "ID чата, учатники которого определяются",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChatMemberListItem"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет доступа к этому чату"
+          },
+          "404": {
+            "description": "Чат не найден"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Добавление пользователей в чат",
+        "parameters": [
+          {
+            "name": "ChatID",
+            "in": "path",
+            "description": "ID чата",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMember"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Пользователь успешно добавлен в чат"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет соответствующих прав доступа к этому чату"
+          },
+          "404": {
+            "description": "Чат не найден"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/chats/{ChatID}/members/{MemberID}": {
+      "delete": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Удаление пользователя из чата",
+        "parameters": [
+          {
+            "name": "ChatID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          },
+          {
+            "name": "MemberID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Пользователь успешно удален из чата"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет соответствующих прав доступа в этом чате"
+          },
+          "404": {
+            "description": "Такой пользователь чата не найден"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/chats/{ChatID}/messages": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Получение сообщений",
+        "parameters": [
+          {
+            "name": "ChatID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Максимальное кол-во возвращаемых записей",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Номер последней полученной записи",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Message"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет право на этот чат"
+          },
+          "404": {
+            "description": "Такого чата не существует"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "summary": "Отправка сообщения в чат с выбранным ID",
+        "description": "Пользователь отправляет сообщение",
+        "parameters": [
+          {
+            "name": "ChatID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "example": 10
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Message"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          },
+          "403": {
+            "description": "Пользователь не имеет доступа к чату"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/media": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Загрузка файла на сервер (аватар, фото группы)",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": null
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка данных"
+          },
+          "401": {
+            "description": "Пользователь не авторизовался"
+          }
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SignInInit": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "example": "abc123"
+          }
+        }
+      },
+      "OAuthCallback": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "4avsde6fscsa12rfsa"
+          },
+          "state": {
+            "type": "string",
+            "example": "abc123"
+          }
+        }
+      },
+      "SignInRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "user@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 6,
+            "example": "StrongPass123"
+          }
+        }
+      },
+      "AuthToken": {
+        "type": "string",
+        "example": "aaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbb.cccccccccccccccccc"
+      },
+      "UserListItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "personal_group_id",
+          "name",
+          "surname",
+          "photo_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 10
+          },
+          "personal_group_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 10
+          },
+          "name": {
+            "type": "string",
+            "example": "Александр",
+            "default": "Noname"
+          },
+          "surname": {
+            "type": "string",
+            "example": "Удивляюсь"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "FriendListItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "surname",
+          "photo_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 10
+          },
+          "name": {
+            "type": "string",
+            "example": "Александр",
+            "default": "Noname"
+          },
+          "surname": {
+            "type": "string",
+            "example": "Удивляюсь",
+            "default": "Nosurname"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "GroupListItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "photo_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1234214213
+          },
+          "name": {
+            "type": "string",
+            "example": "209-я отдельная железнодорожная орденов Кутузова 2-й степени и Красной Звезды бригада",
+            "default": "Noname"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "ChatListItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "photo_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 123412341234
+          },
+          "name": {
+            "type": "string",
+            "example": "Беседа группы АБД",
+            "default": "Noname"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "ChatMemberListItem": {
+        "type": "object",
+        "required": [
+          "user",
+          "is_owner"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserListItem"
+          },
+          "is_owner": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SubscriptionListItem": {
+        "type": "object",
+        "required": [
+          "sub_type",
+          "group_id",
+          "user_id",
+          "name",
+          "photo_url"
+        ],
+        "properties": {
+          "sub_type": {
+            "type": "string",
+            "enum": [
+              "group",
+              "user"
+            ],
+            "default": "group"
+          },
+          "group_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "default": -1,
+            "description": "Если sub_type == group, то user_id == -1, иначе должно иметь значение пользовательского идентфикатора"
+          },
+          "name": {
+            "type": "string",
+            "description": "Это может быть либо название группы или имя пользователя на кого подписались",
+            "example": "Название группы затесавшееся в подписке"
+          },
+          "is_moderator": {
+            "type": "bool",
+            "example": false
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "UserPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Александр"
+          },
+          "surname": {
+            "type": "string",
+            "example": "Удивляюсь"
+          },
+          "job": {
+            "type": "string",
+            "example": "Замполит"
+          },
+          "rang": {
+            "type": "integer",
+            "example": 5
+          },
+          "status": {
+            "type": "string",
+            "example": "На пенсии"
+          },
+          "subdivision": {
+            "type": "string",
+            "example": "209-я отдельная железнодорожная орденов Кутузова 2-й степени и Красной Звезды бригада"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "GroupPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "209-я отдельная железнодорожная орденов Кутузова 2-й степени и Красной Звезды бригада"
+          },
+          "description": {
+            "type": "string",
+            "example": "Описание группы"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "surname",
+          "job",
+          "rang",
+          "status",
+          "subdivision",
+          "photo_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1,
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "example": "Александр",
+            "default": "Noname"
+          },
+          "surname": {
+            "type": "string",
+            "example": "Удивляюсь",
+            "default": "Nosurname"
+          },
+          "job": {
+            "type": "string",
+            "example": "Замполит",
+            "default": "Unknown job"
+          },
+          "rang": {
+            "type": "integer",
+            "example": 5,
+            "default": 0
+          },
+          "status": {
+            "type": "string",
+            "example": "На пенсии",
+            "default": "Unknown status"
+          },
+          "subdivision": {
+            "type": "string",
+            "example": "209-я отдельная железнодорожная орденов Кутузова 2-й степени и Красной Звезды бригада",
+            "default": "Unknown subdivision"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "Comment": {
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "time",
+          "author"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 123434
+          },
+          "paste_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 123222
+          },
+          "text": {
+            "type": "string",
+            "example": "Это мой комментарий"
+          },
+          "time": {
+            "type": "string",
+            "example": "2023-02-06T14:28:00Z"
+          },
+          "author": {
+            "$ref": "#/components/schemas/UserListItem"
+          }
+        }
+      },
+      "Paste": {
+        "type": "object",
+        "required": [
+          "id",
+          "group_id",
+          "text",
+          "time"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 12342134
+          },
+          "group_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 21424343
+          },
+          "text": {
+            "type": "string",
+            "example": "Мне сегодня было очень грустно"
+          },
+          "time": {
+            "type": "string",
+            "example": "2023-02-06T14:28:00Z"
+          }
+        }
+      },
+      "Group": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "photo_url"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "example": 1234214213
+          },
+          "name": {
+            "type": "string",
+            "example": "209-я отдельная железнодорожная орденов Кутузова 2-й степени и Красной Звезды бригада",
+            "default": "No name"
+          },
+          "description": {
+            "type": "string",
+            "example": "Описание группы",
+            "default": "No description"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "text",
+          "time"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1234324214
+          },
+          "chat_member_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 123441412234
+          },
+          "text": {
+            "type": "string",
+            "example": "Привет, дру!"
+          },
+          "time": {
+            "type": "string",
+            "example": "2023-02-06T14:28:00Z"
+          }
+        }
+      },
+      "ChatMember": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "is_owner"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 123441412234
+          },
+          "is_owner": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "Chat": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "photo_url",
+          "chat_type"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 123412341234
+          },
+          "name": {
+            "type": "string",
+            "example": "Беседа группы АБД",
+            "default": "No name"
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          },
+          "chat_type": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "public"
+            ]
+          }
+        }
+      },
+      "FriendPost": {
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          }
+        }
+      },
+      "SubscriptionPost": {
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1234214213
+          },
+          "is_moderator": {
+            "type": "bool",
+            "example": false
+          }
+        }
+      },
+      "ChatPost": {
+        "type": "object",
+        "required": [
+          "name",
+          "chat_type",
+          "users",
+          "photo_url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Беседа группы АБД"
+          },
+          "chat_type": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "public"
+            ]
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "example": 1234
+            }
+          },
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      },
+      "Media": {
+        "type": "object",
+        "properties": {
+          "photo_url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://outside-service.com/files/uploads/123431242.jpg"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session_id"
+      },
+      "JWTAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "'role' - имеет 2 значения - 'user', 'admin'\n'sub' - идентификатор пользователя\n'exp' - Unix-время истечения токена\n"
+      }
+    }
+  }
+}

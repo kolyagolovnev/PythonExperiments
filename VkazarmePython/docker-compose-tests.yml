@@ -1,0 +1,32 @@
+services:
+  unit-runner:
+    build:
+      context: .
+      target: test-unit          # ← только тестовая стадия
+    volumes:
+      - .:/app
+    command: ["python", "-m", "pytest", "tests/unit/", "-v"]
+
+  e2e-runner:
+    build:
+      context: .
+      target: test-e2e
+    environment:
+      DATABASE_URL: postgresql+asyncpg://test_user:test_pass@db-test:5432/test_db
+    depends_on:
+      db-test:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+  db-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+      POSTGRES_DB: test_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 10

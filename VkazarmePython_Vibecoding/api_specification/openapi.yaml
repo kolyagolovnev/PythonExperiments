@@ -1,0 +1,1957 @@
+# =============================================================================
+# Vkazarme — Social Network for Fellow Servicemen
+# Final API contract for frontend handover.
+#
+# Generated from the implemented backend (FastAPI, milestones 1-6). Every
+# path, schema and status code below matches the running service; the FastAPI
+# app exposes the same contract at GET /openapi.json. The realtime WebSocket
+# channel is documented separately in asyncapi.yaml.
+#
+# Differences from draft v0.3 are listed at the bottom of info.description.
+# =============================================================================
+openapi: 3.1.0
+info:
+  title: Social Network for Fellow Servicemen — API
+  version: 1.4.0
+  description: |
+    The goal of the work is to develop a social network for former fellow
+    servicemen: simplified search and communication for those who served in
+    the same unit.
+
+    # Functional requirements
+    - Creating and editing your profile
+    - Posting entries on your profile
+    - Searching, adding, and removing friends
+    - Communicating with friends in chat
+    - Searching, subscribing to, and unsubscribing from groups
+    - Ability to leave comments on group and user posts
+
+    # Scope of this document (milestones 1-5)
+    REST surface: accounts (email/password), user profiles, friends,
+    subscriptions, groups, pastes (posts), comments, chats and media
+    upload/fetch. Realtime chat delivery is a WebSocket channel documented
+    separately in asyncapi.yaml (the REST write path POST
+    /chats/{ChatID}/messages is what triggers the realtime push).
+
+    # Authentication
+    Sign up, then sign in to receive a JWT access token. Send it on every
+    request except `/account/signup` and `/account/signin`:
+
+        Authorization: Bearer <token>
+
+    Token claims: `sub` — user identifier (string), `exp` — Unix expiration
+    time, `role` — `user` or `admin`. Default lifetime is 3600 seconds.
+    Admins are fixed accounts (emails listed server-side in `admins.json`);
+    they get the `admin` role at signup.
+
+    On 401 the body is `{"detail": "..."}` with one of exactly three values:
+    `"Not authenticated"` (no/unknown scheme header), `"Invalid token"`,
+    `"Token expired"`. Use them to decide between redirecting to sign-in and
+    silently refreshing/re-authenticating.
+
+    # Personal groups
+    On signup the backend automatically creates a *personal group* linked to
+    the user (a feed for their personal posts). Personal groups surface in
+    subscription lists as `sub_type: "user"` entries (see
+    `SubscriptionListItem`); topic groups created by admins surface as
+    `sub_type: "group"`.
+
+    # Pagination
+    Collections accept `limit` (1–100, default 10) and `offset` (number of
+    items skipped, default 0) and return plain arrays ordered by id.
+
+    # Errors
+    All errors return `{"detail": ...}` (see `Error`). For malformed requests
+    (bad JSON, failed field validation — including wrong query-parameter
+    ranges) the backend answers **400** with `detail` as an array of
+    validation error objects, not FastAPI's default 422.
+
+    # Changes versus draft v0.3
+    1. `POST /users/{UserID}/friends` body is `FriendPost` (v0.3 referenced a
+       non-existent `Friend` schema); content type is `application/json`.
+    2. `POST /users/{UserID}/subscriptions` body is `SubscriptionPost`
+       (v0.3 referenced a non-existent `Subscription` schema).
+    3. `POST /account/signup` body is `SignUpRequest` (v0.3 referenced a
+       non-existent `SignUpRequest` schema).
+    4. `SubscriptionListItem` gained a required `id` field — otherwise
+       `DELETE /users/{UserID}/subscriptions/{SubscriptionID}` could not be
+       used from the list response.
+    5. Token payload additionally carries `role` (`user`/`admin`) so clients
+       can render admin-only UI; the backend remains the source of truth.
+    6. `photo_url` may be an empty string while the media endpoint does not
+       exist yet.
+    7. `POST /groups/{GroupID}/pastes` body is `PastePost` (`{text}` only) —
+       v0.3 referenced a `PastePost` schema that was not defined in
+       components; the group comes from the path and the author from the
+       token.
+    8. Commenting body is `CommentPost` (`{text}` only) — v0.3 referenced the
+       full `Comment` schema, whose `id`, `time` and `author` are
+       server-generated.
+    9. `Paste` intentionally keeps its v0.3 shape (no author field); the
+       backend tracks the author internally for permission checks. If feeds
+       need to show the post author, add `author: UserListItem` (as `Comment`
+       already has) in a future revision.
+    10. `Message` responses expose `user_id` (the author) — v0.3's property
+        list said `chat_member_id` while its required list said `user_id`;
+        `user_id` won. The message POST body is `MessagePost` (`{text}` only),
+        since v0.3 referenced the full `Message` schema whose id/author/time
+        are server-generated.
+    11. `ChatPost.name` and `ChatPost.photo_url` are optional — a personal
+        1:1 chat has no client-supplied name (it is rendered for each
+        participant from the other participant's profile).
+    12. Chat membership rules the spec leaves open: creating a personal chat
+        is idempotent (a second create for the same pair returns the existing
+        chat); personal chats are fixed (adding/removing members is 403); in
+        public chats any member may add users (the body's `is_owner` is
+        ignored — ownership is assigned at creation), a member may leave, the
+        owner may remove anyone except themself and cannot be removed.
+        Unknown users in chat bodies answer 404.
+    13. `POST /media` takes a proper multipart body with a `file` field
+        (v0.3 declared `type: binary` directly under multipart/form-data,
+        which is not a valid multipart schema). Only images are accepted
+        (image/png, image/jpeg, image/gif, image/webp); the size limit is
+        5 MB by default. A `GET /media/{MediaID}` endpoint was added (it
+        does not exist in v0.3) so the returned `photo_url` resolves; it is
+        public on purpose. Attach the returned URL to a profile or a group
+        via the `photo_url` field of the respective PATCH body.
+
+servers:
+  - url: http://localhost:9999
+    description: Local development server (uvicorn)
+  - url: '{protocol}://{host}'
+    variables:
+      protocol:
+        default: https
+      host:
+        default: api.vkazarme.com
+        description: Base host; a reverse proxy may add the /api/v1 prefix transparently
+
+tags:
+  - name: account
+    description: Registration and sign-in. No token required.
+  - name: users
+    description: >
+      User profiles, search, friends and subscriptions.
+      All operations require a bearer token.
+  - name: groups
+    description: >
+      Topic groups (created by admins), personal-post feeds, their pastes
+      (posts) and comments. All operations require a bearer token.
+  - name: chats
+    description: >
+      Personal (1:1) and public chats, their members and messages (REST
+      polling; realtime delivery is a separate AsyncAPI/WebSocket concern).
+      All operations require a bearer token.
+  - name: media
+    description: >
+      Image upload (avatars, group photos) and fetch. Uploading requires a
+      bearer token; fetching stored files is public so photo URLs work
+      inside <img> tags.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /account/signup:
+    post:
+      tags: [account]
+      operationId: signup
+      summary: Register a new user
+      description: |
+        Creates the account, the user's personal group and the user profile
+        in one step. The password is stored as a bcrypt hash.
+        No token required. A successful response has an empty body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignUpRequest'
+            examples:
+              valid:
+                value:
+                  email: user@example.com
+                  password: StrongPass123
+      responses:
+        '200':
+          description: User created (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+      security: []
+
+  /account/signin:
+    post:
+      tags: [account]
+      operationId: signin
+      summary: Sign in
+      description: |
+        Validates the credentials and returns a JWT access token.
+        Admins sign in here too (their token carries `role: "admin"`).
+        No token required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+            examples:
+              valid:
+                value:
+                  email: user@example.com
+                  password: StrongPass123
+      responses:
+        '200':
+          description: Signed in; the body is the raw JWT string.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Invalid login or password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                badCredentials:
+                  value:
+                    detail: Invalid login or password
+      security: []
+
+  /users:
+    get:
+      tags: [users]
+      operationId: searchUsers
+      summary: Search users
+      description: |
+        Lists users, optionally filtered. Both filters are case-insensitive
+        substring matches and combine with AND. Results are ordered by id.
+      parameters:
+        - $ref: '#/components/parameters/NameQuery'
+        - $ref: '#/components/parameters/SurnameQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of users (short form).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserListItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/{UserID}:
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: Get full user profile
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The full profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Such a user does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [users]
+      operationId: patchUser
+      summary: Edit user profile
+      description: |
+        Only the profile owner may edit (the token's `sub` must equal
+        `UserID`; even admins are rejected). Merge-patch semantics: provide
+        only the fields to change; JSON `null` is treated the same as an
+        absent field. The response has an empty body.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/UserPatch'
+            examples:
+              rename:
+                value:
+                  name: Alexander
+                  rang: 5
+      responses:
+        '200':
+          description: Profile updated (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      summary: Delete user (admin only)
+      description: |
+        Removes the user from the social network. Requires the `admin` role.
+        Cascades: the account, the personal group, the user's friendships and
+        subscriptions are removed too. The deleted user can no longer sign in.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: User deleted (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not an admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /users/{UserID}/friends:
+    get:
+      tags: [users]
+      operationId: listFriends
+      summary: List friends
+      description: |
+        Friends of `UserID`, visible to any authenticated user. The optional
+        name/surname filters work as in `GET /users`.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/NameQuery'
+        - $ref: '#/components/parameters/SurnameQuery'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of friends.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FriendListItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [users]
+      operationId: addFriend
+      summary: Add a friend
+      description: |
+        Adds `user_id` (from the body) as a friend of `UserID`. Only the
+        owner of the friends list may call this (`sub` must equal `UserID`).
+        Friendship is symmetric: it appears in both users' lists.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FriendPost'
+            examples:
+              add:
+                value:
+                  user_id: 2
+      responses:
+        '200':
+          description: Friend added (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          description: |
+            Malformed body, `user_id` equals `UserID`
+            ("Cannot add yourself as a friend"), or the users are already
+            friends ("Users are already friends").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The caller or the target user does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /users/{UserID}/friends/{FriendID}:
+    delete:
+      tags: [users]
+      operationId: removeFriend
+      summary: Remove a friend
+      description: |
+        Removes `FriendID` from `UserID`'s friends (symmetric). Only the
+        owner of the list may call this.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/FriendID'
+      responses:
+        '200':
+          description: Friend removed (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The friendship does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /users/{UserID}/subscriptions:
+    get:
+      tags: [users]
+      operationId: listSubscriptions
+      summary: List subscriptions
+      description: |
+        Groups `UserID` is subscribed to. Subscriptions to personal groups
+        are rendered as user entries (see `SubscriptionListItem.sub_type`).
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of subscriptions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubscriptionListItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [users]
+      operationId: subscribe
+      summary: Subscribe to a group
+      description: |
+        Subscribes `UserID` to `group_id`. Rules:
+        - a regular user may only manage their own subscriptions;
+          an admin may manage anyone's;
+        - `is_moderator: true` may only be set by an admin, and never on
+          someone's personal group.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionPost'
+            examples:
+              plain:
+                value:
+                  group_id: 10
+              moderator:
+                value:
+                  group_id: 10
+                  is_moderator: true
+      responses:
+        '200':
+          description: Subscribed (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          description: Malformed body, or already subscribed
+            ("Already subscribed to this group").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: |
+            Caller is not the subscriber and not an admin, tried to set
+            `is_moderator` without the admin role, or tried to set
+            `is_moderator` on a personal group.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The user or the group does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /users/{UserID}/subscriptions/{SubscriptionID}:
+    delete:
+      tags: [users]
+      operationId: unsubscribe
+      summary: Unsubscribe from a group
+      description: |
+        Removes subscription `SubscriptionID` (its value comes from the `id`
+        field of `SubscriptionListItem`). A regular user may only remove
+        their own subscriptions; an admin may remove anyone's.
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/SubscriptionID'
+      responses:
+        '200':
+          description: Unsubscribed (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Such a subscription does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /groups:
+    get:
+      tags: [groups]
+      operationId: searchGroups
+      summary: Search groups
+      description: |
+        Lists topic groups, optionally filtered by a case-insensitive
+        substring of the name. Results are ordered by id. Personal groups
+        (user post feeds) are **not** listed here — they are discovered
+        through users and subscriptions.
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: Case-insensitive substring match on the group name.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of groups (short form).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GroupListItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [groups]
+      operationId: createGroup
+      summary: Create a group (admin only)
+      description: |
+        Creates a new topic group. Requires the `admin` role. The id is
+        server-assigned. A successful response has an empty body; fetch the
+        created group via `GET /groups/{GroupID}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupPost'
+            examples:
+              brigade:
+                value:
+                  name: 209th Separate Railway Brigade
+                  description: Unit history and reunions
+      responses:
+        '200':
+          description: Group created (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not an admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /groups/{GroupID}:
+    get:
+      tags: [groups]
+      operationId: getGroup
+      summary: Get group profile
+      description: |
+        Works for topic groups and for personal groups (a user's post feed;
+        its `name` is the owner's email set at signup).
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+      responses:
+        '200':
+          description: The full group profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [groups]
+      operationId: patchGroup
+      summary: Edit group (admin only)
+      description: |
+        Requires the `admin` role; even a moderator of the group is rejected.
+        Merge-patch semantics: provide only the fields to change; JSON `null`
+        is treated the same as an absent field. The response has an empty body.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/GroupPatch'
+            examples:
+              rename:
+                value:
+                  description: Unit history, photos and reunions
+      responses:
+        '200':
+          description: Group updated (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [groups]
+      operationId: deleteGroup
+      summary: Delete group (admin only)
+      description: |
+        Requires the `admin` role. Cascades: the group's pastes, all comments
+        on them and every subscription to the group are removed too.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+      responses:
+        '200':
+          description: Group deleted (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{GroupID}/pastes:
+    get:
+      tags: [groups]
+      operationId: listPastes
+      summary: List the group's posts
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of pastes ordered by id.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Paste'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [groups]
+      operationId: createPaste
+      summary: Publish a post in the group
+      description: |
+        Who may publish:
+        - in a **personal** group — only its owner (posting on your profile);
+        - in a **topic** group — the admin and the group's moderators
+          (subscribers with `is_moderator: true`).
+        The author is taken from the token. A successful response has an
+        empty body; fetch the paste via the list or `GET .../pastes/{PasteID}`.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PastePost'
+            examples:
+              post:
+                value:
+                  text: I was very sad today
+      responses:
+        '200':
+          description: Post saved (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller may not publish in this group.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{GroupID}/pastes/{PasteID}:
+    get:
+      tags: [groups]
+      operationId: getPaste
+      summary: Get a post
+      description: A paste addressed under a group it does not belong to is 404.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+        - $ref: '#/components/parameters/PasteID'
+      responses:
+        '200':
+          description: The post content.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paste'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [groups]
+      operationId: deletePaste
+      summary: Delete a post
+      description: |
+        Allowed for the admin, the group's moderator (topic groups), or the
+        owner of the personal group. Cascades: the post's comments are
+        removed too.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+        - $ref: '#/components/parameters/PasteID'
+      responses:
+        '200':
+          description: Post deleted (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller may not delete this post.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{GroupID}/pastes/{PasteID}/comments:
+    get:
+      tags: [groups]
+      operationId: listComments
+      summary: List the post's comments
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+        - $ref: '#/components/parameters/PasteID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of comments ordered by id.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [groups]
+      operationId: addComment
+      summary: Comment on a post
+      description: |
+        Any authenticated user may comment. The author is taken from the
+        token. A successful response has an empty body; fetch comments via
+        the list above.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+        - $ref: '#/components/parameters/PasteID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentPost'
+            examples:
+              comment:
+                value:
+                  text: Keep in touch, brother!
+      responses:
+        '200':
+          description: Comment sent (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /chats:
+    get:
+      tags: [chats]
+      operationId: listChats
+      summary: List the caller's chats
+      description: |
+        The "My messages" tab: chats the caller is a member of, ordered by id.
+        A personal chat is listed under the **other** participant's name and
+        photo (like in messengers); a public chat under its own name.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of chats.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatListItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [chats]
+      operationId: createChat
+      summary: Create a chat
+      description: |
+        `chat_type: "personal"` — a fixed 1:1 chat with the single user from
+        `users` (the caller is added automatically). Creation is idempotent:
+        a second create for the same pair (from either side) returns the
+        existing chat instead of duplicating it.
+
+        `chat_type: "public"` — a group chat named `name`; the caller becomes
+        its owner, `users` are the initial members.
+
+        A successful response has an empty body; find the chat id via
+        `GET /chats`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatPost'
+            examples:
+              personal:
+                value:
+                  chat_type: personal
+                  users: [2]
+              public:
+                value:
+                  chat_type: public
+                  name: 209th Brigade chat
+                  users: [2, 3]
+      responses:
+        '200':
+          description: Chat created (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          description: |
+            Malformed body, or a personal chat whose `users` is not exactly
+            one other user ("A personal chat requires exactly one other user").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: A user from `users` does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chats/{ChatID}:
+    get:
+      tags: [chats]
+      operationId: getChat
+      summary: Open a chat
+      description: Members only (403 for strangers).
+      parameters:
+        - $ref: '#/components/parameters/ChatID'
+      responses:
+        '200':
+          description: The chat profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /chats/{ChatID}/members:
+    get:
+      tags: [chats]
+      operationId: listChatMembers
+      summary: List chat members
+      description: Members only. Ordered by user id.
+      parameters:
+        - $ref: '#/components/parameters/ChatID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of members with their owner flags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatMemberListItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [chats]
+      operationId: addChatMember
+      summary: Add a user to the chat
+      description: |
+        Members only. Allowed only in public chats (personal chats are fixed,
+        403). The body's `is_owner` is accepted for compatibility but ignored:
+        ownership is assigned at chat creation only. Adding an existing member
+        is 400; an unknown user is 404.
+      parameters:
+        - $ref: '#/components/parameters/ChatID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatMemberPost'
+            examples:
+              add:
+                value:
+                  user_id: 3
+      responses:
+        '200':
+          description: User added to the chat (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          description: Malformed body, or the user is already a member
+            ("User is already a chat member").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not a member, or the chat is personal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The chat or the target user does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chats/{ChatID}/members/{MemberID}:
+    delete:
+      tags: [chats]
+      operationId: removeChatMember
+      summary: Remove a user from the chat
+      description: |
+        A member may remove themself (leave); the chat owner may remove
+        anyone except themself. The owner cannot be removed by anyone and
+        cannot leave (403). Personal chats are fixed (403).
+      parameters:
+        - $ref: '#/components/parameters/ChatID'
+        - $ref: '#/components/parameters/MemberID'
+      responses:
+        '200':
+          description: User removed from the chat (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller lacks the rights, or the chat is personal, or the
+            target is the owner.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: The chat or the membership does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chats/{ChatID}/messages:
+    get:
+      tags: [chats]
+      operationId: listMessages
+      summary: Get chat messages
+      description: Members only. Ordered by id (oldest first).
+      parameters:
+        - $ref: '#/components/parameters/ChatID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of messages.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [chats]
+      operationId: sendMessage
+      summary: Send a message to the chat
+      description: |
+        Members only. The author and time are taken from the token and the
+        server clock. A successful response has an empty body; read the
+        messages back via `GET /chats/{ChatID}/messages`.
+      parameters:
+        - $ref: '#/components/parameters/ChatID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessagePost'
+            examples:
+              message:
+                value:
+                  text: Hi, friend!
+      responses:
+        '200':
+          description: Message sent (empty body).
+          content:
+            application/json:
+              schema:
+                type: 'null'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Caller is not a chat member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /media:
+    post:
+      tags: [media]
+      operationId: uploadMedia
+      summary: Upload an image (avatar, group photo)
+      description: |
+        Accepts multipart/form-data with a single `file` field. Only images
+        are accepted: `image/png`, `image/jpeg`, `image/gif`, `image/webp`.
+        An empty file or a file above the size limit (5 MB by default) is
+        rejected with 400. The response carries `photo_url` — attach it to a
+        profile or a group via the `photo_url` field of the respective PATCH
+        body. External image URLs are also allowed in PATCH bodies; media
+        upload is simply the way to host images on this server.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MediaUpload'
+            examples:
+              avatar:
+                value:
+                  file: avatar.png
+      responses:
+        '200':
+          description: File stored; `photo_url` points at GET /media/{MediaID}.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Media'
+        '400':
+          description: |
+            Missing `file` field, empty file, unsupported content type
+            ("Unsupported media type; allowed: image/png, image/jpeg,
+            image/gif, image/webp") or file too large ("File is too large").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /media/{MediaID}:
+    get:
+      tags: [media]
+      operationId: getMedia
+      summary: Fetch a stored file
+      description: |
+        Returns the stored bytes with their original content type. This
+        endpoint is intentionally public (no bearer token): photo URLs must
+        be usable inside `<img>` tags, and profile/group photos are public
+        data in this API.
+      parameters:
+        - $ref: '#/components/parameters/MediaID'
+      responses:
+        '200':
+          description: The stored file.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+      security: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT issued by `POST /account/signin`. Claims:
+        - `sub` — user identifier (string of digits)
+        - `exp` — Unix expiration time (default TTL 3600 s)
+        - `role` — `user` or `admin`
+
+  parameters:
+    UserID:
+      name: UserID
+      in: path
+      required: true
+      description: Identifier of the target user.
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    FriendID:
+      name: FriendID
+      in: path
+      required: true
+      description: Identifier of the friend to remove.
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    SubscriptionID:
+      name: SubscriptionID
+      in: path
+      required: true
+      description: Identifier of the subscription (`SubscriptionListItem.id`).
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    GroupID:
+      name: GroupID
+      in: path
+      required: true
+      description: Identifier of the group (topic group or personal group).
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    PasteID:
+      name: PasteID
+      in: path
+      required: true
+      description: Identifier of the paste (post).
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    ChatID:
+      name: ChatID
+      in: path
+      required: true
+      description: Identifier of the chat.
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    MemberID:
+      name: MemberID
+      in: path
+      required: true
+      description: Identifier of the chat member to remove (a user id).
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    MediaID:
+      name: MediaID
+      in: path
+      required: true
+      description: Identifier of the stored media file.
+      schema:
+        type: integer
+        format: int64
+        examples: [10]
+    NameQuery:
+      name: name
+      in: query
+      required: false
+      description: Case-insensitive substring match on the first name.
+      schema:
+        type: string
+    SurnameQuery:
+      name: surname
+      in: query
+      required: false
+      description: Case-insensitive substring match on the last name.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of records to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: Number of records to skip.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  responses:
+    BadRequest:
+      description: |
+        Invalid data: malformed JSON body, failed field validation (including
+        query-parameter ranges) or a business-rule rejection. `detail` is a
+        string for business rules and an array of validation error objects
+        for request-validation failures.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: |
+        Missing, malformed or expired bearer token. `detail` is exactly one
+        of "Not authenticated", "Invalid token", "Token expired".
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The token is valid but the caller lacks the required rights.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: The requested entity does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    SignUpRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          examples: ["user@example.com"]
+        password:
+          type: string
+          minLength: 6
+          examples: ["StrongPass123"]
+
+    SignInRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          examples: ["user@example.com"]
+        password:
+          type: string
+          minLength: 6
+          examples: ["StrongPass123"]
+
+    AuthToken:
+      type: string
+      description: Raw JWT (three dot-separated base64url segments).
+      examples:
+        - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzkyODQ0MDQ2LCJyb2xlIjoidXNlciJ9.wc9FRQiPViFhEdEde
+
+    UserListItem:
+      type: object
+      description: Short user form used in search results.
+      required: [id, personal_group_id, name, surname, photo_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: User identifier.
+          examples: [10]
+        personal_group_id:
+          type: integer
+          format: int64
+          description: id of the personal group created together with the user.
+          examples: [10]
+        name:
+          type: string
+          default: Noname
+          examples: ["Alexander"]
+        surname:
+          type: string
+          default: Nosurname
+          examples: ["Surprised"]
+        photo_url:
+          type: string
+          description: May be an empty string until media upload exists.
+          examples: ["https://outside-service.com/files/uploads/123431242.jpg"]
+
+    User:
+      type: object
+      description: Full user profile returned by GET /users/{UserID}.
+      required: [id, name, surname, job, rang, status, subdivision, photo_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [1]
+        name:
+          type: string
+          default: Noname
+          examples: ["Alexander"]
+        surname:
+          type: string
+          default: Nosurname
+          examples: ["Surprised"]
+        job:
+          type: string
+          default: Unknown job
+          examples: ["Political Officer"]
+        rang:
+          type: integer
+          description: Military rank code.
+          default: 0
+          examples: [5]
+        status:
+          type: string
+          default: Unknown status
+          examples: ["Retired"]
+        subdivision:
+          type: string
+          default: Unknown subdivision
+          examples: ["209th Separate Railway Brigade of the Orders of Kutuzov 2nd Degree and the Red Star"]
+        photo_url:
+          type: string
+          description: May be an empty string until media upload exists.
+          examples: ["https://outside-service.com/files/uploads/123431242.jpg"]
+
+    UserPatch:
+      type: object
+      description: >
+        Editable profile fields. All optional; omitted fields (and JSON null)
+        are left unchanged.
+      properties:
+        name:
+          type: [string, 'null']
+          examples: ["Alexander"]
+        surname:
+          type: [string, 'null']
+          examples: ["Surprised"]
+        job:
+          type: [string, 'null']
+          examples: ["Political Officer"]
+        rang:
+          type: [integer, 'null']
+          examples: [5]
+        status:
+          type: [string, 'null']
+          examples: ["Retired"]
+        subdivision:
+          type: [string, 'null']
+          examples: ["209th Separate Railway Brigade of the Orders of Kutuzov 2nd Degree and the Red Star"]
+        photo_url:
+          type: [string, 'null']
+
+    FriendPost:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          description: The user to add as a friend.
+          examples: [2]
+
+    FriendListItem:
+      type: object
+      required: [id, name, surname, photo_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [10]
+        name:
+          type: string
+          examples: ["Alexander"]
+        surname:
+          type: string
+          examples: ["Surprised"]
+        photo_url:
+          type: string
+          examples: ["https://outside-service.com/files/uploads/123431242.jpg"]
+
+    SubscriptionPost:
+      type: object
+      required: [group_id]
+      properties:
+        group_id:
+          type: integer
+          format: int64
+          examples: [1234214213]
+        is_moderator:
+          type: boolean
+          default: false
+          description: >
+            May be requested only by an admin and only for topic groups.
+            Silently rejected otherwise (403).
+
+    SubscriptionListItem:
+      type: object
+      description: >
+        One subscription row. For a topic group: `sub_type` is "group",
+        `user_id` is -1 and `name`/`photo_url` come from the group. For a
+        personal group (a user's personal-post feed): `sub_type` is "user",
+        `user_id` is the owner's id, and `name`/`photo_url` come from the
+        owner's profile.
+      required: [id, sub_type, group_id, name]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Subscription identifier; use it to unsubscribe.
+          examples: [3]
+        sub_type:
+          type: string
+          enum: [group, user]
+          examples: ["group"]
+        group_id:
+          type: integer
+          format: int64
+          description: The subscribed group (also when sub_type is "user").
+          examples: [1234214213]
+        user_id:
+          type: integer
+          format: int64
+          default: -1
+          description: -1 for topic groups; the profile owner's id for user feeds.
+          examples: [-1]
+        name:
+          type: string
+          description: Group name, or "FirstName LastName" for user feeds.
+          examples: ["209th Separate Railway Brigade of the Orders of Kutuzov 2nd Degree and the Red Star"]
+        is_moderator:
+          type: boolean
+          default: false
+        photo_url:
+          type: string
+          default: ''
+
+    GroupListItem:
+      type: object
+      description: Short group form used in search results (topic groups only).
+      required: [id, name, photo_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [10]
+        name:
+          type: string
+          examples: ["209th Separate Railway Brigade of the Orders of Kutuzov 2nd Degree and the Red Star"]
+        photo_url:
+          type: string
+          description: May be an empty string until media upload exists.
+          examples: ["https://outside-service.com/files/uploads/123431242.jpg"]
+
+    GroupPost:
+      type: object
+      description: Body of POST /groups; the id is server-assigned.
+      required: [name]
+      properties:
+        name:
+          type: string
+          examples: ["209th Separate Railway Brigade of the Orders of Kutuzov 2nd Degree and the Red Star"]
+        description:
+          type: string
+          default: ''
+          examples: ["Unit history and reunions"]
+        photo_url:
+          type: string
+          default: ''
+
+    Group:
+      type: object
+      description: Full group profile returned by GET /groups/{GroupID}.
+      required: [id, name, description, photo_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [10]
+        name:
+          type: string
+          description: >
+            For personal groups this is the owner's email (set at signup);
+            for topic groups the name given at creation.
+          examples: ["209th Separate Railway Brigade of the Orders of Kutuzov 2nd Degree and the Red Star"]
+        description:
+          type: string
+          default: ''
+          examples: ["Group description"]
+        photo_url:
+          type: string
+          description: May be an empty string until media upload exists.
+          examples: ["https://outside-service.com/files/uploads/123431242.jpg"]
+
+    GroupPatch:
+      type: object
+      description: >
+        Editable group fields (admin only). All optional; omitted fields
+        (and JSON null) are left unchanged.
+      properties:
+        name:
+          type: [string, 'null']
+          examples: ["209th Separate Railway Brigade"]
+        description:
+          type: [string, 'null']
+          examples: ["Unit history and reunions"]
+        photo_url:
+          type: [string, 'null']
+
+    PastePost:
+      type: object
+      description: >
+        Body of POST /groups/{GroupID}/pastes. The group comes from the path
+        and the author from the token, so only the text is accepted.
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          examples: ["I was very sad today"]
+
+    Paste:
+      type: object
+      description: >
+        A post in a group. Kept in the v0.3 shape: it has no author field
+        (the backend tracks the author internally for permission checks).
+      required: [id, group_id, text, time]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [12342134]
+        group_id:
+          type: integer
+          format: int64
+          examples: [21424343]
+        text:
+          type: string
+          examples: ["I was very sad today"]
+        time:
+          type: string
+          format: date-time
+          description: UTC publication time.
+          examples: ["2023-02-06T14:28:00Z"]
+
+    CommentPost:
+      type: object
+      description: >
+        Body of the comment POST. The paste comes from the path and the
+        author from the token; `id` and `time` are server-generated.
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          examples: ["Keep in touch, brother!"]
+
+    Comment:
+      type: object
+      description: A comment on a paste, with the author's short profile.
+      required: [id, paste_id, text, time, author]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [123434]
+        paste_id:
+          type: integer
+          format: int64
+          examples: [123222]
+        text:
+          type: string
+          examples: ["This is my comment"]
+        time:
+          type: string
+          format: date-time
+          description: UTC creation time.
+          examples: ["2023-02-06T14:28:00Z"]
+        author:
+          $ref: '#/components/schemas/UserListItem'
+
+    ChatPost:
+      type: object
+      description: >
+        Body of POST /chats. `name` and `photo_url` are optional (a personal
+        chat is named after the other participant). `users` holds the *other*
+        participants; the caller is always added automatically.
+      required: [chat_type]
+      properties:
+        name:
+          type: string
+          default: ''
+          examples: ["209th Brigade chat"]
+        chat_type:
+          type: string
+          enum: [personal, public]
+          examples: ["personal"]
+        users:
+          type: array
+          description: >
+            Exactly one user for a personal chat; any list for a public chat.
+          items:
+            type: integer
+            format: int64
+          examples: [[2]]
+        photo_url:
+          type: string
+          default: ''
+
+    ChatListItem:
+      type: object
+      description: >
+        Short chat form for the chat list. For a personal chat the name and
+        photo are the *other* participant's, per viewer.
+      required: [id, name, photo_url]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [10]
+        name:
+          type: string
+          examples: ["ABD group conversation"]
+        photo_url:
+          type: string
+          description: May be an empty string until media upload exists.
+          examples: ["https://outside-service.com/files/uploads/123431242.jpg"]
+
+    Chat:
+      type: object
+      description: Full chat profile returned by GET /chats/{ChatID}.
+      required: [id, name, photo_url, chat_type]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [10]
+        name:
+          type: string
+          examples: ["ABD group conversation"]
+        photo_url:
+          type: string
+          examples: ["https://outside-service.com/files/uploads/123431242.jpg"]
+        chat_type:
+          type: string
+          enum: [personal, public]
+          examples: ["personal"]
+
+    ChatMemberPost:
+      type: object
+      description: >
+        Body of POST /chats/{ChatID}/members. `is_owner` is accepted for
+        compatibility with v0.3 but ignored (ownership is assigned at chat
+        creation only).
+      required: [user_id]
+      properties:
+        user_id:
+          type: integer
+          format: int64
+          description: The user to add to the chat.
+          examples: [3]
+        is_owner:
+          type: boolean
+          default: false
+
+    ChatMemberListItem:
+      type: object
+      description: One chat membership with the member's short profile.
+      required: [user, is_owner]
+      properties:
+        user:
+          $ref: '#/components/schemas/UserListItem'
+        is_owner:
+          type: boolean
+          description: True only for the public chat's creator.
+
+    MessagePost:
+      type: object
+      description: >
+        Body of the message POST. The chat comes from the path, the author
+        from the token, the time from the server clock.
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          examples: ["Hi, friend!"]
+
+    Message:
+      type: object
+      description: One chat message; `user_id` is the author.
+      required: [id, user_id, text, time]
+      properties:
+        id:
+          type: integer
+          format: int64
+          examples: [1234324214]
+        user_id:
+          type: integer
+          format: int64
+          description: The message author.
+          examples: [1]
+        text:
+          type: string
+          examples: ["Hi, friend!"]
+        time:
+          type: string
+          format: date-time
+          description: UTC send time.
+          examples: ["2023-02-06T14:28:00Z"]
+
+    MediaUpload:
+      type: object
+      description: Multipart body of POST /media.
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: >
+            The image file. Allowed content types: image/png, image/jpeg,
+            image/gif, image/webp. Maximum size 5 MB by default
+            (server-configurable).
+
+    Media:
+      type: object
+      description: Result of a successful upload.
+      required: [photo_url]
+      properties:
+        photo_url:
+          type: string
+          description: >
+            Path of the stored file, e.g. "/media/42". Resolve it against the
+            API host (a reverse proxy may make it absolute). Attach it to a
+            profile or a group via the `photo_url` field of the respective
+            PATCH body.
+          examples: ["/media/42"]
+
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          description: |
+            Human-readable message, e.g. "User does not have access rights".
+            For 400 request-validation failures this is instead an array of
+            validation error objects (FastAPI/Pydantic format).
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: '#/components/schemas/ValidationErrorItem'
+
+    ValidationErrorItem:
+      type: object
+      properties:
+        type:
+          type: string
+          examples: ["string_too_short"]
+        loc:
+          type: array
+          description: Path to the offending value, e.g. ["body", "password"].
+          items:
+            type: string
+        msg:
+          type: string
+          examples: ["String should have at least 6 characters"]
+        input:
+          description: The rejected input value.

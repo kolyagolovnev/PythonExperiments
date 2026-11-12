@@ -1,0 +1,59 @@
+services:
+  swagger-ui:
+    image: swaggerapi/swagger-editor
+    container_name: swagger
+    ports:
+      - "10081:80"
+    volumes:
+      - ./api_specification:/tmp
+    environment:
+      - SWAGGER_JSON=/tmp/openapi.json
+  fake-provider-server:
+    image: demisto/fastapi:0.125.0.11206988
+    build:
+      context: ./
+      dockerfile: Dockerfile.provider
+    container_name: fake_provider
+    extra_hosts:
+      - "oauth.vk.com:oauth-proxy"
+      #TODO: google oauth
+    ports:
+      - "10082:80"
+    volumes:
+      - ./tests/mock_servers:/app
+    networks:
+      - test-provider-network
+    entrypoint: ["uvicorn", "mock_provider_server:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+    healthcheck:
+      # Используем GET запрос через wget или просто HTTP запрос без curl
+      # Но лучше всего проверить, есть ли у вас маршрут /health. 
+      # Если нет - см. Решение 2.
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"] 
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 2s
+
+  #GET http://localhost:10082/vk/authorize?client_id=vk_client_123&redirect_uri=http://your-app.com/callback&scope=email&state=xyz123
+  #POST http://localhost:10082/vk/token?code=vk_code_vk_client_123_12345&client_id=vk_client_123&client_secret=secret&grant_type=authorization_code&redirect_uri=http://your-app.com/callback
+#TODO: networks
+  provider-tester:
+    image: blairy/requests:latest
+    container_name: provider_tester
+    volumes:
+      - ./tests/mock_clients:/app
+    networks:
+      - test-provider-network
+    entrypoint: ["python", "app/mock_client.py"]
+    depends_on:
+      fake-provider-server:
+        condition: service_healthy
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    ports:
+      - "1025:1025" # SMTP порт
+      - "8025:8025" # Веб-интерфейс
+    restart: unless-stopped
+networks:
+  test-provider-network: {}

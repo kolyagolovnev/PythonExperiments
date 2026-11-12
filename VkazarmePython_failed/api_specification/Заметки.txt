@@ -1,0 +1,38 @@
+**Пути и HTTP‑методы из представленной спецификации**
+
+- POST /account/signup
+- POST /account/signin
+- POST /account/admin
+- GET /users
+- GET /users/{UserID}
+- DELETE /users/{UserID}
+- PATCH /users/{UserID}
+- GET /users/{UserID}/friends
+- POST /users/{UserID}/friends
+- DELETE /users/{UserID}/friends/{FriendID}
+- POST /users/{UserID}/subscriptions
+- GET /users/{UserID}/subscriptions
+- DELETE /users/{UserID}/subscriptions/{SubscriptionID}
+- GET /groups
+- POST /groups
+- GET /groups/{GroupID}
+- PATCH /groups/{GroupID}
+- DELETE /groups/{GroupID}
+- GET /groups/{GroupID}/pastes
+- POST /groups/{GroupID}/pastes
+- GET /groups/{GroupID}/pastes/{PasteID}
+- DELETE /groups/{GroupID}/pastes/{PasteID}
+- GET /groups/{GroupID}/pastes/{PasteID}/comments
+- POST /groups/{GroupID}/pastes/{PasteID}/comments
+- GET /chats
+- POST /chats
+- GET /chats/{ChatID}
+- GET /chats/{ChatID}/members
+- POST /chats/{ChatID}/members
+- DELETE /chats/{ChatID}/members/{MemberID}
+- GET /chats/{ChatID}/messages
+- POST /chats/{ChatID}/messages
+- POST /media
+
+*Методы указаны в верхнем регистре (POST, GET, PATCH, DELETE).*
+Админ либо подписан на все группы (то есть использует тот же токен)
