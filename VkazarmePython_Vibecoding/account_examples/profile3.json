@@ -1,0 +1,11 @@
+{
+      "email": "user2@vkazarme.com",
+      "password": "User12345!",
+      "role": "user",
+      "name": "Николай",
+      "surname": "Орлов",
+      "job": "Пилот",
+      "rang": 3,
+      "status": "В запасе",
+      "subdivision": "Авиаотряд"
+}

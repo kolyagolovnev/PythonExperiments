@@ -1,0 +1,11 @@
+{
+      "email": "user1@vkazarme.com",
+      "password": "User12345!",
+      "role": "user",
+      "name": "Пётр",
+      "surname": "Сергеев",
+      "job": "Инженер",
+      "rang": 2,
+      "status": "В запасе",
+      "subdivision": "Рота связи"
+}

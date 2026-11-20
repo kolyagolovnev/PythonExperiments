@@ -8,6 +8,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY frontend ./frontend
 COPY admins.json .
+COPY account_examples ./account_examples
+COPY group_examples ./group_examples
 
 EXPOSE 9999
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9999"]

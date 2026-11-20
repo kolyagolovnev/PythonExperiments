@@ -10,6 +10,10 @@ upload/fetch, realtime chat delivery over WebSocket, and the database layer —
 SQLAlchemy 2.0 + PostgreSQL behind the same repository interfaces (the
 in-memory repositories remain the default mock layer).
 
+## View
+
+%TODO: Здесь нужно добавить картинки 
+
 ## Architecture
 
 ```
@@ -37,6 +41,7 @@ HTTP request
 app/
   main.py                 app factory, exception→HTTP mapping
   container.py            composition root (repos + services)
+  seed.py                 startup seeding of example accounts and groups
   settings.py             pydantic-settings (.env supported)
   admins.py               fixed admins loaded from a JSON file
   domains/models.py       framework-agnostic domain models
@@ -148,6 +153,58 @@ cp .env.example .env             # optional; defaults work
 - All settings (secret, TTL, bcrypt rounds, admins file) come from the
   environment or `.env` — see `.env.example`.
 
+### Example data on startup
+
+When the application starts (including `docker compose up`), it pre-registers
+the accounts from [`account_examples/`](account_examples/) (one JSON profile
+per file) and creates the topic groups described in `group_examples/`:
+
+| Email | Password | Role |
+|---|---|---|
+| `admin@vkazarme.com` | `Admin12345!` | administrator |
+| `user1@vkazarme.com` | `User12345!` | user |
+| `user2@vkazarme.com` | `User12345!` | user |
+
+The application logs in by **email**, so `email` is the username in each
+`account_examples/profile*.json` (`username` is accepted as an alias there).
+Optional profile fields (`name`, `surname`, `job`, `rang`, `status`,
+`subdivision`, `photo_url`) are applied only when the account is first created.
+
+Each profile is paired with an avatar by number: `profile1.json` gets
+`military1.jpeg`; any supported image extension works. A profile may also name
+its avatar explicitly with `"avatar": "military1.jpeg"`. The avatar is uploaded
+through the normal media service and its `/media/{id}` URL becomes the user's
+`photo_url`.
+
+Groups are read from every `*.txt` file in `group_examples/` (for example
+`description1.txt`) using this format:
+
+```text
+Название группы: Ярые фанаты ОМОНа
+
+Описание: Группа для тех, кто очень сильно хочет ловить хулиганов
+```
+
+An avatar is paired by number: `description1.txt` gets `avatar1.png`;
+`avatar1.jpg`, `avatar1.webp`, etc. work too. The avatar is uploaded through
+the normal media service and its `/media/{id}` URL is stored in the group's
+`photo_url`.
+
+Seeding is idempotent and best-effort: accounts are created only when their
+email is unknown, groups only when a topic group with the same name is absent.
+Existing profiles are not overwritten, so later profile edits and password
+changes survive a restart; only a missing example avatar is filled in. A
+malformed example file is logged and skipped rather than preventing the app
+from starting. The admin account must also be listed in `admins.json`
+(`admin@vkazarme.com` already is) — otherwise the account is created as a
+regular user and groups are skipped.
+
+Disable seeding with `SEED_ENABLED=false` (recommended outside a demo), and
+change these example passwords. With the Compose volume from `pgdata`, the
+data persists: use `docker compose down -v` to wipe it and seed from scratch.
+The directory locations can be overridden with `ACCOUNT_EXAMPLES_DIR` and
+`GROUP_EXAMPLES_DIR`.
+
 ### Data layer
 
 By default the app runs on **in-memory repositories** (data lost on restart).
@@ -173,7 +230,7 @@ public chats).
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest          # 265 tests, ~90 s (bcrypt rounds lowered to 4 in tests)
+.venv/bin/python -m pytest          # 285 tests, ~2 min (bcrypt rounds lowered to 4 in tests)
 ```
 
 The 44 integration tests run the SQLAlchemy repository layer twice — on
@@ -183,8 +240,13 @@ automatically when Docker is unavailable).
 ## Docker
 
 ```bash
-docker compose up --build           # API on :9999 + PostgreSQL, schema auto-created
+docker compose up --build           # API on :9999, PostgreSQL schema + example data
 ```
+
+The Compose file mounts `admins.json`, `account_examples/` and
+`group_examples/` read-only, so editing the examples only needs
+`docker compose restart api` (the database keeps already seeded rows, though).
+Set `SEED_ENABLED=false` to skip seeding entirely.
 
 ## Spec inconsistencies found (for spec v0.4)
 

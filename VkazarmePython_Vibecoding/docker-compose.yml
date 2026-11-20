@@ -25,11 +25,16 @@ services:
       PASSWORD_HASH_ROUNDS: ${PASSWORD_HASH_ROUNDS:-12}
       MEDIA_MAX_BYTES: ${MEDIA_MAX_BYTES:-5000000}
       DATABASE_URL: postgresql+asyncpg://vkazarme:vkazarme@db:5432/vkazarme
+      SEED_ENABLED: ${SEED_ENABLED:-true}
+      ACCOUNT_EXAMPLES_DIR: ${ACCOUNT_EXAMPLES_DIR:-account_examples}
+      GROUP_EXAMPLES_DIR: ${GROUP_EXAMPLES_DIR:-group_examples}
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./admins.json:/srv/app/admins.json:ro
+      - ./account_examples:/srv/app/account_examples:ro
+      - ./group_examples:/srv/app/group_examples:ro
 
 volumes:
   pgdata:

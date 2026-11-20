@@ -1,0 +1,11 @@
+{
+      "email": "admin@vkazarme.com",
+      "password": "Admin12345!",
+      "role": "admin",
+      "name": "Иван",
+      "surname": "Админов",
+      "job": "Администратор",
+      "rang": 5,
+      "status": "На службе",
+      "subdivision": "Штаб"
+}

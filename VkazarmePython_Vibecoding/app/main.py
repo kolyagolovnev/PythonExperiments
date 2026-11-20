@@ -1,5 +1,6 @@
 """Application factory and HTTP error mapping."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -12,8 +13,11 @@ from app.api import account_router, chats_router, groups_router, media_router, u
 from app.container import Container, build_container
 from app.middleware import FrontendMiddleware
 from app.repositories import exceptions as rex
+from app.seed import seed_examples
 from app.services import exceptions as sex
 from app.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 _DESCRIPTION = """The goal of the work is to develop a social network for former fellow servicemen.
 
@@ -97,6 +101,12 @@ def create_app(settings: Settings | None = None,
     async def lifespan(_: FastAPI):
         # database mode: create the schema (idempotent); in-memory: no-op
         await container.setup()
+        # Example accounts/groups are best-effort: bad example files must not
+        # prevent the service from starting.
+        try:
+            await seed_examples(container)
+        except Exception:
+            logger.exception("Example data seeding failed; starting without it")
         yield
         await container.shutdown()
 
